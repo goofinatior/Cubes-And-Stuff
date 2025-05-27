@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cubes And Stuff</title>
+
+<!-- Manifest -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#007bff" />
+
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    font-family: Arial, sans-serif;
+    background: #f0f2f5;
+  }
+  #canvas-container {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background-size: cover;
+    background-position: center center;
+  }
+  canvas {
+    display: block;
+    background: transparent;
+  }
+  #sidebar {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: 320px;
+    background: #fff;
+    box-shadow: -2px 0 8px rgba(0,0,0,0.15);
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+    overflow-y: auto;
+    padding: 16px;
+    box-sizing: border-box;
+    z-index: 10;
+  }
+  #sidebar.open {
+    transform: translateX(0);
+  }
+  #toggleSidebarBtn {
+    position: fixed;
+    top: 20px; right: 20px;
+    width: 44px; height: 44px;
+    background: #007bff;
+    border-radius: 50%;
+    border: none;
+    color: white;
+    font-size: 28px;
+    line-height: 44px;
+    cursor: pointer;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+    z-index: 20;
+    user-select: none;
+    transition: background-color 0.25s ease;
+  }
+  #toggleSidebarBtn:hover {
+    background: #0056b3;
+  }
+  h2 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  label {
+    display: block;
+    margin: 12px 0 4px 0;
+  }
+  input[type="range"], input[type="number"], input[type="text"], select {
+    width: 100%;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+  }
+  button, #shapePicker button {
+    margin-top: 12px;
+    width: 100%;
+    padding: 10px 0;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #007bff;
+    color: white;
+    user-select: none;
+    transition: background-color 0.25s ease;
+  }
+  button:hover, #shapePicker button:hover {
+    background: #0056b3;
+  }
+  #shapePicker {
+    margin-top: 8px;
+    display: none;
+  }
+  #shapePicker button {
+    width: auto;
+    margin-right: 8px;
+    padding: 6px 12px;
+  }
+  #objectProperties {
+    margin-top: 16px;
+    border-top: 1px solid #ddd;
+    padding-top: 12px;
+  }
+  #messageBox {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 20px;
+    font-size: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 30;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<button id="toggleSidebarBtn" title="Toggle Options">☰</button>
+
+<div id="sidebar">
+  <h2>Options</h2>
+
+  <label for="gravitySlider">Gravity: <span id="gravityVal">1</span></label>
+  <input type="range" id="gravitySlider" min="0" max="2" step="0.01" value="1" />
+
+  <button id="resetBtn">Reset Scene</button>
+
+  <label for="bgImageUrl">Background Image URL</label>
+  <input type="text" id="bgImageUrl" placeholder="Paste URL and press Enter" />
+
+  <label for="imgObjUrl">Add Image Object URL</label>
+  <input type="text" id="imgObjUrl" placeholder="Image URL" />
+  <button id="addImageObjBtn">Add Image Object</button>
+
+  <button id="addShapeBtn">Add Shape</button>
+  <div id="shapePicker">
+    <button data-shape="rectangle">Rectangle</button>
+    <button data-shape="circle">Circle</button>
+    <button data-shape="triangle">Triangle</button>
+    <button data-shape="square">Square</button>
+  </div>
+
+  <label><input type="checkbox" id="buildModeToggle" /> Build Mode</label>
+
+  <div id="objectProperties" style="display:none;">
+    <h3>Selected Object</h3>
+    <label for="propMass">Mass</label>
+    <input type="number" id="propMass" min="0.1" step="0.1" />
+    <label for="propFriction">Friction</label>
+    <input type="range" id="propFriction" min="0" max="1" step="0.01" />
+    <label for="propRestitution">Restitution (Bounciness)</label>
+    <input type="range" id="propRestitution" min="0" max="1" step="0.01" />
+    <label for="propColor">Color</label>
+    <input type="color" id="propColor" />
+    <button id="deleteObjectBtn" style="background:#d9534f;">Delete Object</button>
+  </div>
+</div>
+
+<div id="messageBox"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+<script>
+(() => {
+  const { Engine, Render, Runner, Composite, Bodies, Body, Events, Mouse, MouseConstraint, Vector, Vertices } = Matter;
+
+  // Setup engine & renderer
+  const engine = Engine.create();
+  const world = engine.world;
+  engine.gravity.y = 1;
+
+  const container = document.getElementById('canvas-container');
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  const render = Render.create({
+    element: container,
+    engine: engine,
+    options: {
+      width,
+      height,
+      wireframes: false,
+      background: 'transparent',
+      pixelRatio: window.devicePixelRatio,
+      showAngleIndicator: false,
+    },
+  });
+
+  Render.run(render);
+  const runner = Runner.create();
+  Runner.run(runner, engine);
+
+  // Boundaries
+  let boundaries = [];
+  function createBoundaries() {
+    boundaries.forEach(b => Composite.remove(world, b));
+    boundaries = [
+      Bodies.rectangle(width/2, -10, width, 20, { isStatic: true }),
+      Bodies.rectangle(width/2, height+10, width, 20, { isStatic: true }),
+      Bodies.rectangle(-10, height/2, 20, height, { isStatic: true }),
+      Bodies.rectangle(width+10, height/2, 20, height, { isStatic: true }),
+    ];
+    boundaries.forEach(b => Composite.add(world, b));
+  }
+  createBoundaries();
+
+  window.addEventListener('resize', () => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    render.bounds.max.x = w;
+    render.bounds.max.y = h;
+    render.options.width = w;
+    render.options.height = h;
+    render.canvas.width = w * window.devicePixelRatio;
+    render.canvas.height = h * window.devicePixelRatio;
+    Render.setPixelRatio(render, window.devicePixelRatio);
+    createBoundaries();
+  });
+
+  // Objects list
+  let objects = [];
+
+  // Default blue rectangle cube
+  function addDefaultCube() {
+    const cube = Bodies.rectangle(width/2, height/2, 80, 80, {
+      render: { fillStyle: '#007bff' },
+      friction: 0.2,
+      restitution: 0.1,
+      mass: 1,
+    });
+    Composite.add(world, cube);
+    objects.push(cube);
+  }
+  addDefaultCube();
+
+  // Selection and editing
+  let selectedBody = null;
+  const sidebar = document.getElementById('sidebar');
+  const propMass = document.getElementById('propMass');
+  const propFriction = document.getElementById('propFriction');
+  const propRestitution = document.getElementById('propRestitution');
+  const propColor = document.getElementById('propColor');
+  const objectProperties = document.getElementById('objectProperties');
+  const deleteObjectBtn = document.getElementById('deleteObjectBtn');
+
+  function clearSelection() {
+    selectedBody = null;
+    objectProperties.style.display = 'none';
+  }
+
+  function selectBody(body) {
+    selectedBody = body;
+    if (!body) {
+      clearSelection();
+      return;
+    }
+    objectProperties.style.display = 'block';
+    propMass.value = body.mass.toFixed(2);
+    propFriction.value = body.friction.toFixed(2);
+    propRestitution.value = body.restitution.toFixed(2);
+
+    // Color only for shapes without textures
+    if (body.render.sprite.texture) {
+      propColor.disabled = true;
+      propColor.value = '#cccccc';
+    } else {
+      propColor.disabled = false;
+      propColor.value = body.render.fillStyle || '#007bff';
+    }
+  }
+
+  // Mouse + Selection logic
+
+  const mouse = Mouse.create(render.canvas);
+  const mouseConstraint = MouseConstraint.create(engine, {
+    mouse,
+    constraint: {
+      stiffness: 0.2,
+      render: { visible: false },
+      angularStiffness: 0.4,
+    },
+  });
+  Composite.add(world, mouseConstraint);
+
+  // Dragging + rotating near corners logic
+  let rotatingBody = null;
+  let rotationStartAngle = 0;
+  let rotationStartMouseAngle = 0;
+  let isRotating = false;
+
+  function pointNearCorner(body, point) {
+    const vertices = body.vertices;
+    for (const v of vertices) {
+      const dist = Vector.magnitude(Vector.sub(v, point));
+      if (dist < 15) return true;
+    }
+    return false;
+  }
+
+  Events.on(mouseConstraint, 'startdrag', e => {
+    if (!e.body) return;
+    // Check if near corner, start rotating
+    if (pointNearCorner(e.body, e.mouse.position)) {
+      rotatingBody = e.body;
+      rotationStartAngle = e.body.angle;
+      rotationStartMouseAngle = Math.atan2(
+        e.mouse.position.y - e.body.position.y,
+        e.mouse.position.x - e.body.position.x
+      );
+      isRotating = true;
+      // Cancel drag
+      mouseConstraint.constraint.bodyB = null;
+    }
+  });
+
+  Events.on(mouseConstraint, 'mousemove', e => {
+    if (isRotating && rotatingBody) {
+      const currentMouseAngle = Math.atan2(
+        e.mouse.position.y - rotatingBody.position.y,
+        e.mouse.position.x - rotatingBody.position.x
+      );
+      const angleDiff = currentMouseAngle - rotationStartMouseAngle;
+      Body.setAngle(rotatingBody, rotationStartAngle + angleDiff);
+    }
+  });
+
+  Events.on(mouseConstraint, 'enddrag', e => {
+    rotatingBody = null;
+    isRotating = false;
+  });
+
+  // Selection on click
+  render.canvas.addEventListener('mousedown', e => {
+    if (buildMode && pendingShape) return; // In build mode placing shape, ignore selection
+
+    const mousePos = mouse.position;
+    let found = null;
+    // Pick topmost object under mouse
+    for (let i = objects.length - 1; i >= 0; i--) {
+      const body = objects[i];
+      if (Matter.Bounds.contains(body.bounds, mousePos)) {
+        if (Matter.Vertices.contains(body.vertices, mousePos)) {
+          found = body;
+          break;
+        }
+      }
+    }
+    selectBody(found);
+  });
+
+  // Update properties on input
+  propMass.addEventListener('input', () => {
+    if (!selectedBody) return;
+    const val = parseFloat(propMass.value);
+    if (val > 0) {
+      Body.setMass(selectedBody, val);
+    }
+  });
+  propFriction.addEventListener('input', () => {
+    if (!selectedBody) return;
+    selectedBody.friction = parseFloat(propFriction.value);
+  });
+  propRestitution.addEventListener('input', () => {
+    if (!selectedBody) return;
+    selectedBody.restitution = parseFloat(propRestitution.value);
+  });
+  propColor.addEventListener('input', () => {
+    if (!selectedBody) return;
+    if (!selectedBody.render.sprite.texture) {
+      selectedBody.render.fillStyle = propColor.value;
+    }
+  });
+
+  // Delete object
+  deleteObjectBtn.addEventListener('click', () => {
+    if (!selectedBody) return;
+    Composite.remove(world, selectedBody);
+    objects = objects.filter(o => o !== selectedBody);
+    clearSelection();
+  });
+
+  // Gravity slider
+  const gravitySlider = document.getElementById('gravitySlider');
+  const gravityVal = document.getElementById('gravityVal');
+  gravitySlider.addEventListener('input', () => {
+    const val = parseFloat(gravitySlider.value);
+    engine.gravity.y = val;
+    gravityVal.textContent = val.toFixed(2);
+  });
+
+  // Reset button
+  const resetBtn = document.getElementById('resetBtn');
+  resetBtn.addEventListener('click', () => {
+    // Remove all except default cube
+    objects.forEach(o => Composite.remove(world, o));
+    objects = [];
+    addDefaultCube();
+    clearSelection();
+    engine.gravity.y = 1;
+    gravitySlider.value = '1';
+    gravityVal.textContent = '1';
+    setBackground('');
+    document.getElementById('bgImageUrl').value = '';
+    document.getElementById('imgObjUrl').value = '';
+  });
+
+  // Background image
+  const bgInput = document.getElementById('bgImageUrl');
+  bgInput.addEventListener('change', () => {
+    setBackground(bgInput.value);
+  });
+  bgInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      setBackground(bgInput.value);
+      e.target.blur();
+    }
+  });
+
+  function setBackground(url) {
+    if (!url) {
+      container.style.backgroundImage = '';
+    } else {
+      container.style.backgroundImage = `url(${url})`;
+    }
+  }
+
+  // Add image object
+  const imgInput = document.getElementById('imgObjUrl');
+  const addImageObjBtn = document.getElementById('addImageObjBtn');
+  addImageObjBtn.addEventListener('click', () => {
+    const url = imgInput.value.trim();
+    if (!url) {
+      showMessage('Enter a valid image URL');
+      return;
+    }
+    addImageObject(url);
+    imgInput.value = '';
+  });
+
+  function addImageObject(url) {
+    const w = 80, h = 80;
+    const body = Bodies.rectangle(width / 2, height / 2, w, h, {
+      render: { sprite: { texture: url, xScale: 1, yScale: 1 } },
+      friction: 0.2,
+      restitution: 0.1,
+      mass: 1,
+    });
+    Composite.add(world, body);
+    objects.push(body);
+    selectBody(body);
+  }
+
+  // Shape picker toggle and add shape buttons
+  const addShapeBtn = document.getElementById('addShapeBtn');
+  const shapePicker = document.getElementById('shapePicker');
+
+  addShapeBtn.addEventListener('click', () => {
+    shapePicker.style.display = shapePicker.style.display === 'block' ? 'none' : 'block';
+  });
+
+  // Build mode toggle
+  const buildModeToggle = document.getElementById('buildModeToggle');
+  let buildMode = false;
+  buildModeToggle.addEventListener('change', e => {
+    buildMode = e.target.checked;
+    pendingShape = null;
+    shapePicker.style.display = 'none';
+    clearSelection();
+  });
+
+  // Add shapes handler
+  let pendingShape = null;
+  shapePicker.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      pendingShape = btn.dataset.shape;
+      shapePicker.style.display = 'none';
+      showMessage(`Build Mode: Click on canvas to place ${pendingShape}`);
+    });
+  });
+
+  // Canvas click for build mode shape placement
+  render.canvas.addEventListener('click', e => {
+    if (!buildMode || !pendingShape) return;
+
+    const rect = render.canvas.getBoundingClientRect();
+    const mousePos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+    // Snap position to grid or near existing objects (like Lego)
+    const snap = getSnapPosition(mousePos);
+
+    addShapeAt(pendingShape, snap.x, snap.y, true);
+
+    pendingShape = null;
+    showMessage('Block placed!');
+  });
+
+  function addShapeAt(shape, x, y, makeStatic) {
+    let body;
+    switch(shape) {
+      case 'rectangle':
+        body = Bodies.rectangle(x, y, 100, 60);
+        break;
+      case 'square':
+        body = Bodies.rectangle(x, y, 80, 80);
+        break;
+      case 'circle':
+        body = Bodies.circle(x, y, 40);
+        break;
+      case 'triangle':
+        body = Bodies.fromVertices(x, y, Vertices.fromPath('0 40 40 40 20 0'));
+        break;
+      default:
+        body = Bodies.rectangle(x, y, 80, 80);
+    }
+    if (makeStatic) {
+      Body.setStatic(body, true);
+      body.render.fillStyle = '#3a86ff';
+    } else {
+      body.render.fillStyle = '#007bff';
+    }
+    Composite.add(world, body);
+    objects.push(body);
+    selectBody(body);
+  }
+
+  // Simple grid snapping near existing blocks for build mode
+  function getSnapPosition(pos) {
+    const gridSize = 40;
+    // Snap to grid:
+    let x = Math.round(pos.x / gridSize) * gridSize;
+    let y = Math.round(pos.y / gridSize) * gridSize;
+
+    // Snap near nearby bodies
+    const snapDist = 50;
+    for (const b of objects) {
+      const dx = Math.abs(b.position.x - x);
+      const dy = Math.abs(b.position.y - y);
+      if (dx < snapDist && dy < snapDist) {
+        // Snap to b's grid-aligned position
+        x = Math.round(b.position.x / gridSize) * gridSize;
+        y = Math.round(b.position.y / gridSize) * gridSize;
+        break;
+      }
+    }
+    return { x, y };
+  }
+
+  // Sidebar toggle button
+  const toggleSidebarBtn = document.getElementById('toggleSidebarBtn');
+  toggleSidebarBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('open');
+  });
+
+  // Show temporary messages
+  const messageBox = document.getElementById('messageBox');
+  let msgTimeout = null;
+  function showMessage(text, duration = 2000) {
+    messageBox.textContent = text;
+    messageBox.style.opacity = '1';
+    if (msgTimeout) clearTimeout(msgTimeout);
+    msgTimeout = setTimeout(() => {
+      messageBox.style.opacity = '0';
+    }, duration);
+  }
+
+  // Initial message
+  showMessage('Welcome! Click ☰ to open options');
+
+  // Service Worker Registration
+  if ('serviceWorker' in navigator) {
+    // To avoid needing separate file, register a service worker from blob URL
+    const swCode = `
+      const CACHE_NAME = 'physics-builder-cache-v1';
+      const FILES_TO_CACHE = [
+        '/',
+        '/index.html',
+        '/manifest.json',
+        // Add your JS/CSS files if any external
+      ];
+      self.addEventListener('install', event => {
+        event.waitUntil(
+          caches.open(CACHE_NAME).then(cache => cache.addAll(FILES_TO_CACHE))
+        );
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', event => {
+        event.waitUntil(
+          caches.keys().then(keys =>
+            Promise.all(
+              keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+            )
+          )
+        );
+        self.clients.claim();
+      });
+      self.addEventListener('fetch', event => {
+        event.respondWith(
+          caches.match(event.request).then(resp => resp || fetch(event.request))
+        );
+      });
+    `;
+    const blob = new Blob([swCode], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl).then(() => {
+      console.log('Service Worker registered');
+    }).catch(console.error);
+  }
+})();
+</script>
+</body>
+</html>
